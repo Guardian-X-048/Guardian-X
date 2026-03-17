@@ -1,0 +1,107 @@
+const express = require('express');
+const cors = require('cors');
+const helmet = require('helmet');
+const morgan = require('morgan');
+const rateLimit = require('express-rate-limit');
+
+const intelxRoutes = require('./routes/intelx');
+const nvidiaRoutes = require('./routes/nvidia');
+const alertsRoutes = require('./routes/alerts');
+const breachController = require('./controllers/breachController');
+const riskController = require('./controllers/riskController');
+const visualizationController = require('./controllers/visualizationController');
+
+const app = express();
+const PORT = process.env.PORT || 3001;
+
+// Security middleware
+app.use(helmet());
+app.use(cors({
+  origin: process.env.FRONTEND_URL || 'http://localhost:5173',
+  credentials: true
+}));
+app.use(morgan('combined'));
+app.use(express.json());
+
+// Rate limiting
+const limiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 1000, // limit each IP to 1000 requests per windowMs
+  message: { success: false, error: { code: 'RATE_LIMIT', message: 'Too many requests' } }
+});
+app.use(limiter);
+
+// API Routes
+app.use('/api/intelx', intelxRoutes);
+app.use('/api/nvidia', nvidiaRoutes);
+app.use('/api/alerts', alertsRoutes);
+
+// Health check
+app.get('/health', (req, res) => {
+  res.json({
+    status: 'healthy',
+    timestamp: new Date().toISOString(),
+    services: {
+      intelx: 'connected',
+      nvidia: 'ready',
+      database: 'connected'
+    }
+  });
+});
+
+// Dashboard stats endpoint
+app.get('/api/stats', (req, res) => {
+  res.json({
+    success: true,
+    data: {
+      totalAlerts: 156,
+      criticalCount: 12,
+      avgRiskScore: 68,
+      aiAccuracy: 94.7,
+      threatsBlocked: 12847,
+      uptime: 99.97,
+      nvidiaLatency: 12,
+      lastUpdated: new Date().toISOString()
+    },
+    meta: { count: 6, latency: '8ms' }
+  });
+});
+
+// Risk score endpoint
+app.get('/api/risk-score', riskController.getRiskScore);
+
+// Threat graph data
+app.get('/api/threat-graph', visualizationController.getThreatGraph);
+
+// AI predictions
+app.get('/api/predictions', nvidiaRoutes);
+
+// Error handling middleware
+app.use((err, req, res, next) => {
+  console.error('Error:', err);
+  res.status(err.status || 500).json({
+    success: false,
+    error: {
+      code: err.code || 'INTERNAL_ERROR',
+      message: process.env.NODE_ENV === 'production' 
+        ? 'An unexpected error occurred' 
+        : err.message
+    }
+  });
+});
+
+// 404 handler
+app.use((req, res) => {
+  res.status(404).json({
+    success: false,
+    error: { code: 'NOT_FOUND', message: 'Endpoint not found' }
+  });
+});
+
+app.listen(PORT, () => {
+  console.log(`🔒 GuardianX API Server running on port ${PORT}`);
+  console.log(`📡 IntelX integration: ${process.env.INTELX_API_KEY ? 'Configured' : 'Demo Mode'}`);
+  console.log(`🤖 NVIDIA AI: ${process.env.NVIDIA_API_KEY ? 'Configured' : 'Demo Mode'}`);
+});
+
+module.exports = app;
